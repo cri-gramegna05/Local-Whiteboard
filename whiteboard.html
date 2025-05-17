@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P2P Whiteboard</title>
+  <style>
+    body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
+    canvas { border: 1px solid black; cursor: crosshair; }
+    #controls { margin: 10px; display: flex; gap: 10px; align-items: center; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="start">Start Drawing</button>
+    <button id="connect">Connect Peer</button>
+    <label>Color: <input type="color" id="color" value="#000000"></label>
+    <label>Size: <input type="range" id="size" min="1" max="20" value="2"></label>
+    <button id="eraser">Eraser</button>
+  </div>
+  <canvas id="board" width="800" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let isErasing = false;
+
+    let colorPicker = document.getElementById('color');
+    let sizePicker = document.getElementById('size');
+    let eraserButton = document.getElementById('eraser');
+
+    let pc = new RTCPeerConnection();
+    let dataChannel;
+
+    canvas.addEventListener('mousedown', () => drawing = true);
+    canvas.addEventListener('mouseup', () => {
+      drawing = false;
+      ctx.beginPath();
+    });
+    canvas.addEventListener('mousemove', draw);
+
+    eraserButton.addEventListener('click', () => {
+      isErasing = !isErasing;
+      eraserButton.textContent = isErasing ? 'Draw' : 'Eraser';
+    });
+
+    function draw(e) {
+      if (!drawing) return;
+
+      const x = e.offsetX;
+      const y = e.offsetY;
+      const color = isErasing ? '#FFFFFF' : colorPicker.value;
+      const size = sizePicker.value;
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = size;
+      ctx.lineCap = 'round';
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+
+      if (dataChannel && dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({ x, y, color, size }));
+      }
+    }
+
+    document.getElementById('start').onclick = async () => {
+      dataChannel = pc.createDataChannel('whiteboard');
+      setupChannel();
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      console.log('SEND THIS OFFER TO REMOTE PEER:\n', JSON.stringify(offer));
+    };
+
+    document.getElementById('connect').onclick = async () => {
+      const answerStr = prompt('Paste remote offer/answer JSON here:');
+      const remoteDesc = new RTCSessionDescription(JSON.parse(answerStr));
+      await pc.setRemoteDescription(remoteDesc);
+      if (remoteDesc.type === 'offer') {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log('SEND THIS ANSWER TO REMOTE PEER:\n', JSON.stringify(answer));
+      }
+    };
+
+    pc.ondatachannel = (event) => {
+      dataChannel = event.channel;
+      setupChannel();
+    };
+
+    function setupChannel() {
+      dataChannel.onmessage = (event) => {
+        const { x, y, color, size } = JSON.parse(event.data);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size;
+        ctx.lineCap = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      };
+    }
+  </script>
+</body>
+</html>
